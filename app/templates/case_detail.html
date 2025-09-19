@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <h1>{{ case.name }}</h1>
+    <div class="row">
+      <a class="btn btn-secondary" href="/cases">← Back to Cases</a>
+      <a class="btn btn-primary" href="/upload?case={{ case.id }}">Upload Files</a>
+    </div>
+  </div>
+  <div class="panel-body">
+    <p class="muted">{{ case.description or 'No description provided' }}</p>
+    <div class="case-meta">
+      <span class="muted">Created: {{ case.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="tile">
+    <h3>Files</h3>
+    <div class="stat-number">{{ stats.total_files }}</div>
+    <div class="muted">Total files</div>
+  </div>
+  <div class="tile">
+    <h3>Storage</h3>
+    <div class="stat-number" id="file-size">{{ stats.total_size_bytes | filesizeformat }}</div>
+    <div class="muted">Used space</div>
+  </div>
+  <div class="tile">
+    <h3>Processing</h3>
+    <div class="stat-number">{{ stats.processing_files }}</div>
+    <div class="muted">In progress</div>
+  </div>
+  <div class="tile">
+    <h3>Completed</h3>
+    <div class="stat-number">{{ stats.completed_files }}</div>
+    <div class="muted">Processed</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2>Recent Activity</h2>
+  </div>
+  <div class="panel-body">
+    <div class="muted">Activity log will be implemented in future version</div>
+  </div>
+</div>
+
+<style>
+.stat-number {
+  font-size: 2em;
+  font-weight: bold;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.case-meta {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--tile-border);
+}
+</style>
+{% endblock %}
