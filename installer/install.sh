@@ -7,79 +7,58 @@ PY_ENV="$APP_DIR/venv"
 OS_USER="casescope"
 SERVICE_NAME="casescope"
 
-# Ensure log dir/file exist before redirecting stdout/stderr
-sudo mkdir -p "$LOG_DIR"
-sudo touch "${LOG_DIR}/install.log"
-
-# Redirect logs after the file exists
-exec 3>&1
-exec 1>>"${LOG_DIR}/install.log"
-exec 2>&1
-
+sudo mkdir -p "$LOG_DIR"; sudo touch "${LOG_DIR}/install.log"
+exec 3>&1; exec 1>>"${LOG_DIR}/install.log"; exec 2>&1
 msg(){ echo "$(date -u +"%F %T") | $*" >&3; echo "$(date -u +"%F %T") | $*"; }
 
-pre_checks(){
-  msg "Starting install..."
-  if ! id -u "$OS_USER" >/dev/null 2>&1; then
-    sudo useradd -r -s /usr/sbin/nologin -d "$APP_DIR" "$OS_USER" || true
-  fi
-  sudo mkdir -p "$APP_DIR"
-  sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR" || true
-}
-install_prereqs(){
-  msg "Installing prerequisites"
-  sudo apt update -y
-  sudo apt install -y curl unzip python3-venv python3-pip openjdk-17-jre-headless
-}
+pre(){ msg "Starting install..."; id -u "$OS_USER" >/dev/null 2>&1 || sudo useradd -r -s /usr/sbin/nologin -d "$APP_DIR" "$OS_USER"; sudo mkdir -p "$APP_DIR"; sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR"; }
+prereq(){ msg "Installing prerequisites"; sudo apt update -y; sudo apt install -y curl unzip python3-venv python3-pip openjdk-17-jre-headless jq ca-certificates gnupg lsb-release rsync; }
+kernel(){ msg "Setting vm.max_map_count"; echo 'vm.max_map_count=262144' | sudo tee /etc/sysctl.d/99-opensearch.conf >/dev/null; sudo sysctl -w vm.max_map_count=262144 >/dev/null; }
 
-install_opensearch(){
+repo(){
   if [ ! -f /etc/apt/sources.list.d/opensearch.list ]; then
     msg "Installing OpenSearch repo"
     curl -fsSL https://artifacts.opensearch.org/publickeys/opensearch.pgp | sudo gpg --dearmor -o /usr/share/keyrings/opensearch-keyring.gpg
     echo "deb [signed-by=/usr/share/keyrings/opensearch-keyring.gpg] https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt stable main" | sudo tee /etc/apt/sources.list.d/opensearch.list
     sudo apt update -y
-    sudo apt install -y opensearch
-    sudo sed -i 's|^#\?network.host:.*|network.host: 127.0.0.1|' /etc/opensearch/opensearch.yml
-    sudo sed -i 's|^#\?discovery.type:.*|discovery.type: single-node|' /etc/opensearch/opensearch.yml
-    sudo systemctl enable --now opensearch
   fi
+}
+
+os_dirs(){
+  sudo systemctl stop opensearch 2>/dev/null || true
+  sudo mkdir -p /etc/opensearch /var/lib/opensearch /var/log/opensearch /run/opensearch
+  sudo ln -sf /run/opensearch /var/run/opensearch
+  id opensearch >/dev/null 2>&1 || sudo useradd --system --home-dir /var/lib/opensearch --shell /usr/sbin/nologin opensearch
+  sudo chown -R opensearch:opensearch /var/lib/opensearch /var/log/opensearch /run/opensearch
+  echo 'd /run/opensearch 0755 opensearch opensearch -' | sudo tee /etc/tmpfiles.d/opensearch.conf >/dev/null
+  sudo systemd-tmpfiles --create
+}
+
+install_opensearch(){
+  msg "Installing OpenSearch (demo disabled)"
+  sudo DEBIAN_FRONTEND=noninteractive DISABLE_INSTALL_DEMO_CONFIGURATION=true apt install -y opensearch || true
+  sudo sed -i '/^plugins\\.security\\.disabled/d;/^network\\.host:/d;/^discovery\\.type:/d' /etc/opensearch/opensearch.yml 2>/dev/null || true
+  printf '%s\n%s\n%s\n' \
+    'plugins.security.disabled: true' \
+    'network.host: 127.0.0.1' \
+    'discovery.type: single-node' | sudo tee -a /etc/opensearch/opensearch.yml >/dev/null
+  sudo env DISABLE_INSTALL_DEMO_CONFIGURATION=true dpkg --configure -a || true
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now opensearch || (sudo journalctl -u opensearch -n 200 --no-pager >&3; exit 1)
   sleep 5
-  curl -k -s http://127.0.0.1:9200 | jq . >/dev/null || { msg "OpenSearch not healthy"; exit 1; }
+  curl -s http://127.0.0.1:9200 >/dev/null || { msg "OpenSearch not healthy"; exit 1; }
   msg "OpenSearch is up"
 }
 
-setup_python(){
+venv(){
   msg "Setting up Python venv"
   sudo -u "$OS_USER" python3 -m venv "$PY_ENV"
   sudo -u "$OS_USER" "$PY_ENV/bin/pip" install --upgrade pip
   sudo -u "$OS_USER" "$PY_ENV/bin/pip" install -r "$APP_DIR/requirements.txt"
 }
 
-install_chainsaw_sigma(){
-  msg "Installing Chainsaw and Sigma rules"
-  CHAIN_DIR="$APP_DIR/tools/chainsaw"
-  SIGMA_DIR="$APP_DIR/tools/sigma"
-  sudo -u "$OS_USER" mkdir -p "$CHAIN_DIR" "$SIGMA_DIR"
-  # Chainsaw
-  if [ ! -f "$CHAIN_DIR/chainsaw" ]; then
-    URL=$(curl -s https://api.github.com/repos/WithSecureLabs/chainsaw/releases/latest | jq -r '.assets[] | select(.name|test("linux.*zip$")) | .browser_download_url' | head -n1)
-    curl -L "$URL" -o /tmp/chainsaw.zip
-    sudo -u "$OS_USER" unzip -o /tmp/chainsaw.zip -d "$CHAIN_DIR"
-    sudo chmod +x "$CHAIN_DIR"/chainsaw*
-    sudo -u "$OS_USER" ln -sf "$CHAIN_DIR"/chainsaw* "$CHAIN_DIR/chainsaw"
-  fi
-  # Sigma rules
-  if [ ! -d "$SIGMA_DIR/rules" ]; then
-    sudo -u "$OS_USER" git clone https://github.com/SigmaHQ/sigma.git "$SIGMA_DIR/sigma_repo"
-    sudo -u "$OS_USER" mkdir -p "$SIGMA_DIR/rules"
-    sudo -u "$OS_USER" rsync -a "$SIGMA_DIR/sigma_repo/rules/" "$SIGMA_DIR/rules/"
-  else
-    sudo -u "$OS_USER" bash -c "cd $SIGMA_DIR/sigma_repo && git pull --rebase || true"
-  fi
-}
-
-create_systemd(){
-  msg "Creating systemd service"
+service(){
+  msg "Creating API service"
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service >/dev/null <<UNIT
 [Unit]
 Description=caseScope API
@@ -89,7 +68,7 @@ After=network.target opensearch.service
 User=${OS_USER}
 Group=${OS_USER}
 WorkingDirectory=${APP_DIR}
-Environment="PATH=${PY_ENV}/bin"
+Environment=PATH=${PY_ENV}/bin
 ExecStart=${PY_ENV}/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 
@@ -100,17 +79,14 @@ UNIT
   sudo systemctl enable --now ${SERVICE_NAME}.service
 }
 
-post_info(){
-  msg "Install complete."
-  msg "Service: systemctl status ${SERVICE_NAME}"
-  msg "App:     http://SERVER_IP:8080"
-  msg "Health:  curl -s http://127.0.0.1:8080/health"
+sync_repo(){
+  # If run from cloned repo, sync into /opt
+  if [ -d "$PWD/app" ]; then
+    msg "Syncing repo -> ${APP_DIR}"
+    sudo rsync -a --delete "$PWD/" "$APP_DIR/"
+    sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR"
+  fi
 }
 
-pre_checks
-install_prereqs
-install_opensearch
-setup_python
-install_chainsaw_sigma
-create_systemd
-post_info
+pre; prereq; kernel; repo; sync_repo; os_dirs; install_opensearch; venv; service
+msg "Install complete. App: http://SERVER_IP:8080  Health: curl -s http://127.0.0.1:8080/health"
