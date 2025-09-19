@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+  <h1>Files in Case</h1>
+  
+  <div class="form-actions">
+    <a href="/upload?case={{ case_id }}" class="btn btn-primary">Upload More Files</a>
+    <a href="/cases" class="btn btn-secondary">Back to Cases</a>
+  </div>
+  
+  <div class="files-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Filename</th>
+          <th>Size</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Uploaded</th>
+          <th>Events</th>
+          <th>Detections</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for file in files %}
+        <tr>
+          <td class="filename" title="{{ file.filename }}">{{ file.filename }}</td>
+          <td class="size">{{ (file.size_bytes / 1024) | round(1) }} KB</td>
+          <td class="status">
+            {% if file.status == "completed" %}
+              <span class="status-completed">• Completed</span>
+            {% elif file.status == "processing" %}
+              <span class="status-processing">• Processing</span>
+            {% elif file.status == "error" %}
+              <span class="status-error">• Error</span>
+            {% else %}
+              <span class="status-queued">• Queued</span>
+            {% endif %}
+          </td>
+          <td class="progress">
+            {% if file.status == "processing" %}
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: {{ file.progress }}%"></div>
+              </div>
+              <span class="progress-text">{{ file.progress }}%</span>
+            {% else %}
+              <span class="progress-text">{{ file.progress }}%</span>
+            {% endif %}
+          </td>
+          <td class="uploaded">{{ file.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="events">{{ file.events_ingested or 0 }}</td>
+          <td class="detections">{{ file.detections_found or 0 }}</td>
+          <td class="actions">
+            {% if file.status == "completed" %}
+              <button onclick="rerunRules({{ file.id }})" class="btn btn-sm btn-secondary">Re-run Rules</button>
+              <button onclick="reindexFile({{ file.id }})" class="btn btn-sm btn-secondary">Re-index</button>
+            {% elif file.status == "error" %}
+              <button onclick="rerunRules({{ file.id }})" class="btn btn-sm btn-secondary">Re-run Rules</button>
+              <button onclick="reindexFile({{ file.id }})" class="btn btn-sm btn-secondary">Re-index</button>
+            {% else %}
+              <span class="processing-text">Processing...</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function rerunRules(fileId) {
+  fetch(`/files/${fileId}/rerun-rules`, { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        location.reload();
+      } else {
+        alert('Failed to re-run rules');
+      }
+    });
+}
+
+function reindexFile(fileId) {
+  fetch(`/files/${fileId}/reindex`, { method: 'POST' })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        location.reload();
+      } else {
+        alert('Failed to re-index file');
+      }
+    });
+}
+</script>
+
+<style>
+.files-table {
+  margin-top: 2rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #2a2a2a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+th, td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #444;
+}
+
+th {
+  background: #333;
+  font-weight: 600;
+  color: #fff;
+}
+
+td {
+  color: #ccc;
+}
+
+.filename {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-completed {
+  color: #4CAF50;
+}
+
+.status-processing {
+  color: #FF9800;
+}
+
+.status-error {
+  color: #f44336;
+}
+
+.status-queued {
+  color: #2196F3;
+}
+
+.progress-bar {
+  width: 100px;
+  height: 8px;
+  background: #444;
+  border-radius: 4px;
+  overflow: hidden;
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #2196F3;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: #888;
+}
+
+.events, .detections {
+  text-align: center;
+  font-weight: bold;
+}
+
+.events {
+  color: #4CAF50;
+}
+
+.detections {
+  color: #FF9800;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.processing-text {
+  color: #FF9800;
+  font-size: 12px;
+}
+</style>
+{% endblock %}

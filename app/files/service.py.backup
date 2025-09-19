@@ -1,0 +1,443 @@
+import os
+import hashlib
+import subprocess
+import json
+from datetime import datetime
+from sqlalchemy.orm import Session
+from app.cases.models import File
+from app.opensearch.client import get_opensearch_client, get_case_index_name
+from app.auth.audit import log_audit
+from typing import List, Dict, Any
+
+def save_uploaded_file(file_content: bytes, filename: str, case_id: int, user_id: int, db: Session) -> File:
+    try:
+        print(f"DEBUG: save_uploaded_file called with filename={filename}, case_id={case_id}, content_length={len(file_content)}")
+        
+        # Calculate file hash for deduplication
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        
+        # Check for duplicates
+        existing = db.query(File).filter(File.file_hash == file_hash, File.case_id == case_id).first()
+        if existing and existing.status == "completed":
+            print(f"DEBUG: Duplicate file found, returning existing")
+            return existing
+        
+        print(f"DEBUG: Creating upload directory for case {case_id}")
+        # Create upload directory if it doesn't exist
+        upload_dir = f"/opt/casescope/uploads/case_{case_id}"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        print(f"DEBUG: Saving file to disk")
+        # Save file to disk
+        file_path = os.path.join(upload_dir, filename)
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+        
+        print(f"DEBUG: Creating database record")
+        # Create file record
+        file_record = File(
+            case_id=case_id,
+            filename=filename,
+            size_bytes=len(file_content),
+            status="queued",
+            progress=0,
+            uploaded_by=user_id,
+            file_hash=file_hash
+        )
+        db.add(file_record)
+        db.commit()
+        
+        print(f"DEBUG: Starting background processing")
+        # Start background processing
+        import threading
+        thread = threading.Thread(target=process_file, args=(file_record.id, file_path, case_id))
+        thread.daemon = True
+        thread.start()
+        
+        print(f"DEBUG: File saved successfully, returning record")
+        return file_record
+        
+    except Exception as e:
+        print(f"DEBUG: Error in save_uploaded_file: {e}")
+        raise e
+
+def process_file(file_id: int, file_path: str, case_id: int):
+    """Process EVTX file with Chainsaw and apply Sigma rules"""
+    from app.db import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        print(f"DEBUG: Starting file processing for file_id={file_id}")
+        # Update status to processing
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            print(f"DEBUG: File record not found for file_id={file_id}")
+            return
+        
+        file_record.status = "processing"
+        file_record.progress = 10
+        db.commit()
+        
+        # Run Chainsaw on the EVTX file
+        output_dir = f"/opt/casescope/processed/case_{case_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        chainsaw_cmd = [
+            "/opt/casescope/tools/chainsaw/chainsaw/chainsaw",
+            "hunt",
+            file_path,
+            "--mapping", "/opt/casescope/tools/chainsaw/mappings/sigma-event-logs-all.yml",
+            "--sigma", "/opt/casescope/tools/sigma/rules",
+            "--output", f"{output_dir}/chainsaw_output_{file_id}.json",
+            "--json"
+        ]
+        
+        file_record.progress = 30
+        db.commit()
+        
+        print(f"DEBUG: Running Chainsaw command: {' '.join(chainsaw_cmd)}")
+        result = subprocess.run(chainsaw_cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            print(f"DEBUG: Chainsaw failed with return code {result.returncode}")
+            print(f"DEBUG: Chainsaw stderr: {result.stderr}")
+            file_record.status = "error"
+            file_record.error_message = result.stderr
+            file_record.progress = 100
+            db.commit()
+            return
+        
+        file_record.progress = 50
+        db.commit()
+        
+        # Parse Chainsaw output and index to OpenSearch
+        json_files = [f for f in os.listdir(output_dir) if f.endswith('.json')]
+        events_processed = 0
+        detections_found = 0
+        
+        client = get_opensearch_client()
+        index_name = get_case_index_name(case_id)
+        
+        for json_file in json_files:
+            json_path = os.path.join(output_dir, json_file)
+            with open(json_path, 'r') as f:
+                events = json.load(f)
+                if not isinstance(events, list):
+                    events = [events]
+                
+                for event in events:
+                    events_processed += 1
+                    
+                    # Check if this event has rule violations (detections)
+                    has_detection = False
+                    if 'tags' in event and event['tags']:
+                        # If there are tags, it means Sigma rules matched
+                        has_detection = True
+                        detections_found += 1
+                    
+                    # Apply severity tagging based on Sigma rules
+                    severity = determine_severity(event)
+                    
+                    # Create event document for OpenSearch
+                    event_doc = {
+                        "timestamp": event.get("timestamp", datetime.utcnow().isoformat()),
+                        "event_id": event.get("event_id", ""),
+                        "source": event.get("source", ""),
+                        "host": event.get("host", ""),
+                        "record_hash": hashlib.sha256(json.dumps(event, sort_keys=True).encode()).hexdigest(),
+                        "severity": severity,
+                        "tags": event.get("tags", []),
+                        "file_id": file_id,
+                        "case_id": case_id,
+                        "has_detection": has_detection,
+                        "raw": json.dumps(event)
+                    }
+                    
+                    # Index to OpenSearch
+                    try:
+                        client.index(index=index_name, body=event_doc)
+                    except Exception as e:
+                        print(f"Failed to index event: {e}")
+        
+        file_record.progress = 80
+        db.commit()
+        
+        # Update file status
+        file_record.status = "completed"
+        file_record.progress = 100
+        file_record.processed_at = datetime.utcnow()
+        file_record.events_ingested = events_processed
+        file_record.detections_found = detections_found
+        db.commit()
+        
+        print(f"DEBUG: File processing completed - Events: {events_processed}, Detections: {detections_found}")
+        
+        # Clean up temporary files
+        os.remove(file_path)
+        for f in os.listdir(output_dir):
+            os.remove(os.path.join(output_dir, f))
+        os.rmdir(output_dir)
+        
+    except Exception as e:
+        print(f"DEBUG: Error in process_file: {e}")
+        file_record.status = "error"
+        file_record.error_message = str(e)
+        file_record.progress = 100
+        db.commit()
+    finally:
+        db.close()
+
+def determine_severity(event: Dict[str, Any]) -> str:
+    """Determine severity based on Sigma rule tags"""
+    tags = event.get("tags", [])
+    if not tags:
+        return "low"  # No rule matches = low severity
+    
+    # Check for high severity indicators
+    high_severity_tags = [
+        "attack.tactics.impact",
+        "attack.tactics.exfiltration", 
+        "attack.tactics.defense_evasion",
+        "attack.tactics.credential_access"
+    ]
+    
+    # Check for medium severity indicators
+    medium_severity_tags = [
+        "attack.tactics.persistence",
+        "attack.tactics.privilege_escalation",
+        "attack.tactics.lateral_movement",
+        "attack.tactics.collection"
+    ]
+    
+    for tag in tags:
+        if any(high_tag in tag for high_tag in high_severity_tags):
+            return "severe"
+        elif any(med_tag in tag for med_tag in medium_severity_tags):
+            return "moderate"
+    
+    return "low"
+
+def get_files_for_case(db: Session, case_id: int) -> List[File]:
+    """Get all files for a specific case"""
+    return db.query(File).filter(File.case_id == case_id).order_by(File.uploaded_at.desc()).all()
+
+def rerun_rules_for_file(file_id: int, db: Session) -> bool:
+        os.rmdir(output_dir)
+        
+        return True
+    finally:
+        db.close()
+        
+    except Exception as e:
+        print(f"Error in rerun_rules_for_file: {e}")
+        file_record.status = "error"
+        file_record.error_message = str(e)
+        file_record.progress = 100
+        db.commit()
+        return False
+    finally:
+        db.close()
+
+def reindex_file(file_id: int, db: Session) -> bool:
+    """Re-index a file to OpenSearch"""
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            return False
+        
+        # Update status to processing
+        file_record.status = "processing"
+        file_record.progress = 0
+        db.commit()
+        
+        # Get the file path
+        file_path = f"/opt/casescope/uploads/case_{file_record.case_id}/{file_record.filename}"
+        
+        if not os.path.exists(file_path):
+            file_record.status = "error"
+            file_record.error_message = "File not found on disk"
+            file_record.progress = 100
+            db.commit()
+            return False
+        
+        # Remove existing events from OpenSearch
+        client = get_opensearch_client()
+        index_name = get_case_index_name(file_record.case_id)
+        
+        try:
+            client.delete_by_query(
+                index=index_name,
+                body={"query": {"term": {"file_id": file_id}}}
+            )
+        except Exception as e:
+            print(f"Error removing existing events: {e}")
+        
+        file_record.progress = 50
+        db.commit()
+        
+        # Re-process the file
+        import threading
+        thread = threading.Thread(target=process_file, args=(file_record.id, file_path, file_record.case_id))
+        thread.daemon = True
+        thread.start()
+        
+        return True
+    finally:
+        db.close()
+        
+    except Exception as e:
+        print(f"Error in reindex_file: {e}")
+        file_record.status = "error"
+        file_record.error_message = str(e)
+        file_record.progress = 100
+        db.commit()
+        return False
+    finally:
+        db.close()
+
+def rerun_rules_for_file(file_id: int, db: Session) -> bool:
+    """Re-run Sigma rules on a file without re-indexing"""
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            return False
+        
+        # Update status to processing
+        file_record.status = "processing"
+        file_record.progress = 0
+        db.commit()
+        
+        # Get the file path
+        file_path = f"/opt/casescope/uploads/case_{file_record.case_id}/{file_record.filename}"
+        
+        if not os.path.exists(file_path):
+            file_record.status = "error"
+            file_record.error_message = "File not found on disk"
+            file_record.progress = 100
+            db.commit()
+            return False
+        
+        # Run Chainsaw again
+        output_dir = f"/opt/casescope/processed/case_{file_record.case_id}"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        chainsaw_cmd = [
+            "/opt/casescope/tools/chainsaw/chainsaw/chainsaw",
+            "hunt",
+            file_path,
+            "--mapping", "/opt/casescope/tools/chainsaw/mappings/sigma-event-logs-all.yml",
+            "--sigma", "/opt/casescope/tools/sigma/rules",
+            "--output", f"{output_dir}/chainsaw_output_{file_id}.json",
+            "--json"
+        ]
+        
+        file_record.progress = 50
+        db.commit()
+        
+        result = subprocess.run(chainsaw_cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode != 0:
+            file_record.status = "error"
+            file_record.error_message = result.stderr
+            file_record.progress = 100
+            db.commit()
+            return False
+        
+        # Re-count detections
+        json_files = [f for f in os.listdir(output_dir) if f.endswith('.json')]
+        detections_found = 0
+        
+        for json_file in json_files:
+            json_path = os.path.join(output_dir, json_file)
+            with open(json_path, 'r') as f:
+                events = json.load(f)
+                if not isinstance(events, list):
+                    events = [events]
+                
+                for event in events:
+                    if 'tags' in event and event['tags']:
+                        detections_found += 1
+        
+        # Update file record
+        file_record.status = "completed"
+        file_record.progress = 100
+        file_record.detections_found = detections_found
+        db.commit()
+        
+        # Clean up
+        for f in os.listdir(output_dir):
+            os.remove(os.path.join(output_dir, f))
+        os.rmdir(output_dir)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error in rerun_rules_for_file: {e}")
+        file_record.status = "error"
+        file_record.error_message = str(e)
+        file_record.progress = 100
+        db.commit()
+        return False
+    finally:
+        db.close()
+
+def reindex_file(file_id: int, db: Session) -> bool:
+    """Re-index a file to OpenSearch"""
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        file_record = db.query(File).filter(File.id == file_id).first()
+        if not file_record:
+            return False
+        
+        # Update status to processing
+        file_record.status = "processing"
+        file_record.progress = 0
+        db.commit()
+        
+        # Get the file path
+        file_path = f"/opt/casescope/uploads/case_{file_record.case_id}/{file_record.filename}"
+        
+        if not os.path.exists(file_path):
+            file_record.status = "error"
+            file_record.error_message = "File not found on disk"
+            file_record.progress = 100
+            db.commit()
+            return False
+        
+        # Remove existing events from OpenSearch
+        client = get_opensearch_client()
+        index_name = get_case_index_name(file_record.case_id)
+        
+        try:
+            client.delete_by_query(
+                index=index_name,
+                body={"query": {"term": {"file_id": file_id}}}
+            )
+        except Exception as e:
+            print(f"Error removing existing events: {e}")
+        
+        file_record.progress = 50
+        db.commit()
+        
+        # Re-process the file
+        import threading
+        thread = threading.Thread(target=process_file, args=(file_record.id, file_path, file_record.case_id))
+        thread.daemon = True
+        thread.start()
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error in reindex_file: {e}")
+        file_record.status = "error"
+        file_record.error_message = str(e)
+        file_record.progress = 100
+        db.commit()
+        return False
+    finally:
+        db.close()

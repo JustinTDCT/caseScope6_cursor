@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+  <h1>{{ case.name }}</h1>
+  <p class="case-description">{{ case.description or 'No description provided' }}</p>
+  
+  <div class="case-info">
+    <div class="info-item">
+      <strong>Created:</strong> {{ case.created_at.strftime('%Y-%m-%d %H:%M') }}
+    </div>
+    <div class="info-item">
+      <strong>Created by:</strong> {{ case.created_by }}
+    </div>
+  </div>
+  
+  <div class="case-dashboard">
+    <div class="case-tile clickable" onclick="window.location.href='/files/{{ case.id }}'">
+      <h3>Files</h3>
+      <div class="count-display">{{ stats.total_files }}</div>
+      <div class="tile-action">View Files →</div>
+    </div>
+    
+    <div class="case-tile clickable" onclick="window.location.href='/search?case={{ case.id }}'">
+      <h3>Events</h3>
+      <div class="count-display">{{ stats.total_events or 0 }}</div>
+      <div class="tile-action">Search Events →</div>
+    </div>
+    
+    <div class="case-tile clickable" onclick="window.location.href='/search?case={{ case.id }}&filter=violations'">
+      <h3>Detections</h3>
+      <div class="count-display">{{ stats.total_detections or 0 }}</div>
+      <div class="tile-action">Search Violations →</div>
+    </div>
+    
+    <div class="case-tile">
+      <h3>Storage Used</h3>
+      <div class="storage-display">{{ (stats.total_size_bytes / (1024 * 1024)) | round(1) }} MB</div>
+    </div>
+  </div>
+  
+  <div class="case-actions">
+    <a href="/upload?case={{ case.id }}" class="btn btn-primary">Upload Files</a>
+    <a href="/cases" class="btn btn-secondary">Back to Cases</a>
+  </div>
+</div>
+
+<style>
+.case-description {
+  color: #ccc;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #2a2a2a;
+  border-radius: 8px;
+  border-left: 4px solid #2196F3;
+}
+
+.case-info {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 2rem;
+}
+
+.info-item {
+  color: #ccc;
+  margin-bottom: 0.5rem;
+}
+
+.info-item strong {
+  color: #fff;
+}
+
+.case-dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.case-tile {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border: 1px solid #444;
+  transition: all 0.3s ease;
+  text-align: center;
+}
+
+.case-tile.clickable {
+  cursor: pointer;
+  border: 1px solid #555;
+}
+
+.case-tile.clickable:hover {
+  border-color: #2196F3;
+  background: #333;
+  transform: translateY(-2px);
+}
+
+.case-tile h3 {
+  margin: 0 0 1rem 0;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.count-display {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #2196F3;
+  margin-bottom: 0.5rem;
+}
+
+.storage-display {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #FF9800;
+}
+
+.tile-action {
+  color: #2196F3;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-top: 0.5rem;
+}
+
+.case-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+</style>
+{% endblock %}

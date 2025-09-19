@@ -1,20 +1,248 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="grid">
-  <div class="tile">OpenSearch: <span id="os-status">Checking...</span></div>
-  <div class="tile">OS: <span id="os-version">Loading...</span></div>
-  <div class="tile">Sigma rules: <span id="sigma-count">0</span> | Updated: <span id="sigma-updated">N/A</span></div>
-  <div class="tile">Chainsaw rules: <span id="chainsaw-count">0</span> | Updated: <span id="chainsaw-updated">N/A</span></div>
-  <div class="tile">Cases: <span id="case-count">0</span></div>
-  <div class="tile">Files: <span id="file-count">0</span> | Size: <span id="file-size">0 B</span></div>
+<div class="container">
+  <h1>System Dashboard</h1>
+  
+  <div class="dashboard-grid">
+    <div class="dashboard-tile">
+      <h3>OpenSearch Status</h3>
+      <div id="opensearch-status" class="status-indicator">Loading...</div>
+      <div id="opensearch-version" class="version-info"></div>
+    </div>
+    
+    <div class="dashboard-tile">
+      <h3>System Info</h3>
+      <div id="os-version" class="info-item">Loading...</div>
+      <div id="hostname" class="info-item">Loading...</div>
+      <div id="uptime" class="info-item">Loading...</div>
+    </div>
+    
+    <div class="dashboard-tile">
+      <h3>Service Versions</h3>
+      <div id="service-versions" class="version-list">Loading...</div>
+    </div>
+    
+    <div class="dashboard-tile">
+      <h3>Sigma Rules</h3>
+      <div id="sigma-count" class="count-display">Loading...</div>
+      <div id="sigma-updated" class="update-info">Loading...</div>
+    </div>
+    
+    <div class="dashboard-tile">
+      <h3>Chainsaw Rules</h3>
+      <div id="chainsaw-count" class="count-display">Loading...</div>
+      <div id="chainsaw-updated" class="update-info">Loading...</div>
+    </div>
+    
+    <div class="dashboard-tile clickable" onclick="window.location.href='/cases'">
+      <h3>Cases</h3>
+      <div id="case-count" class="count-display">Loading...</div>
+      <div class="tile-action">View Cases →</div>
+    </div>
+    
+    <div class="dashboard-tile clickable" onclick="window.location.href='/files/1'">
+      <h3>Files</h3>
+      <div id="file-count" class="count-display">Loading...</div>
+      <div class="tile-action">View Files →</div>
+    </div>
+    
+    <div class="dashboard-tile">
+      <h3>Storage Usage</h3>
+      <div id="storage-usage" class="storage-display">Loading...</div>
+    </div>
+  </div>
+  
+  <div class="recent-cases">
+    <h2>Recent Cases</h2>
+    <div id="recent-cases" class="cases-list">Loading...</div>
+  </div>
 </div>
-<div class="tile">
-  <h2>Recent cases</h2>
-  <ul id="recent-cases"></ul>
-</div>
+
 <script>
-document.addEventListener("DOMContentLoaded", ()=> {
-  document.getElementById("os-status").innerText = "Pending setup";
+document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    const response = await fetch('/api/dashboard-data');
+    const data = await response.json();
+    
+    // Update OpenSearch status
+    document.getElementById('opensearch-status').textContent = data.opensearch_status;
+    const statusElement = document.getElementById('opensearch-status');
+    if (data.opensearch_status === 'green' || data.opensearch_status === 'healthy') {
+      statusElement.className = 'status-indicator status-ok';
+    } else {
+      statusElement.className = 'status-indicator status-error';
+    }
+    document.getElementById('opensearch-version').textContent = `v${data.opensearch_version}`;
+    
+    // Update system info
+    document.getElementById('os-version').textContent = `OS: ${data.os_version}`;
+    document.getElementById('hostname').textContent = `Host: ${data.hostname}`;
+    document.getElementById('uptime').textContent = `Uptime: ${data.uptime}`;
+    
+    // Update service versions
+    const serviceVersions = document.getElementById('service-versions');
+    serviceVersions.innerHTML = Object.entries(data.service_versions)
+      .map(([name, version]) => `<div class="version-item">${name}: ${version}</div>`)
+      .join('');
+    
+    // Update rule counts
+    document.getElementById('sigma-count').textContent = data.sigma_count;
+    document.getElementById('sigma-updated').textContent = `Updated: ${data.sigma_updated}`;
+    document.getElementById('chainsaw-count').textContent = data.chainsaw_count;
+    document.getElementById('chainsaw-updated').textContent = `Updated: ${data.chainsaw_updated}`;
+    
+    // Update case and file counts
+    document.getElementById('case-count').textContent = data.case_count;
+    document.getElementById('file-count').textContent = data.file_count;
+    
+    // Update storage usage
+    const sizeBytes = data.file_size_bytes || 0;
+    const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
+    document.getElementById('storage-usage').textContent = `${sizeMB} MB`;
+    
+    // Update recent cases
+    const casesDiv = document.getElementById('recent-cases');
+    if (data.recent_cases.length === 0) {
+      casesDiv.innerHTML = '<div class="muted">No cases yet</div>';
+    } else {
+      casesDiv.innerHTML = data.recent_cases.map(caseItem =>
+        `<div class="case-item" onclick="openCase(${caseItem.id})">
+          <strong>${caseItem.name}</strong>
+          <div class="muted">${caseItem.description || 'No description'}</div>
+          <div class="muted">Created: ${new Date(caseItem.created_at).toLocaleDateString()}</div>
+        </div>`
+      ).join('');
+    }
+  } catch (error) {
+    console.error('Failed to load dashboard data:', error);
+    document.getElementById('opensearch-status').textContent = 'Error loading data';
+  }
 });
+
+function openCase(caseId) {
+  window.location.href = `/cases/${caseId}`;
+}
 </script>
+
+<style>
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.dashboard-tile {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border: 1px solid #444;
+  transition: all 0.3s ease;
+}
+
+.dashboard-tile.clickable {
+  cursor: pointer;
+  border: 1px solid #555;
+}
+
+.dashboard-tile.clickable:hover {
+  border-color: #2196F3;
+  background: #333;
+  transform: translateY(-2px);
+}
+
+.dashboard-tile h3 {
+  margin: 0 0 1rem 0;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.status-indicator {
+  font-size: 1.2rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.status-ok {
+  color: #4CAF50;
+}
+
+.status-error {
+  color: #f44336;
+}
+
+.count-display {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #2196F3;
+  margin-bottom: 0.5rem;
+}
+
+.version-info, .update-info, .info-item {
+  color: #888;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.version-list {
+  color: #ccc;
+}
+
+.version-item {
+  margin-bottom: 0.25rem;
+}
+
+.tile-action {
+  color: #2196F3;
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-top: 0.5rem;
+}
+
+.storage-display {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #FF9800;
+}
+
+.recent-cases {
+  margin-top: 2rem;
+}
+
+.recent-cases h2 {
+  color: #fff;
+  margin-bottom: 1rem;
+}
+
+.cases-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.case-item {
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #444;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.case-item:hover {
+  border-color: #2196F3;
+  background: #333;
+}
+
+.case-item strong {
+  color: #fff;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.muted {
+  color: #888;
+  font-size: 0.9rem;
+}
+</style>
 {% endblock %}

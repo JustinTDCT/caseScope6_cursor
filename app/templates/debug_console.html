@@ -1,0 +1,70 @@
+<div id="debugConsole" style="display: block; position: fixed; bottom: 0; left: 0; right: 0; background: #1a1a1a; color: #00ff00; font-family: monospace; font-size: 12px; height: 200px; overflow-y: auto; border-top: 2px solid #00ff00; z-index: 9999; resize: vertical;">
+  <div style="padding: 8px; background: #333; display: flex; justify-content: space-between; align-items: center;">
+    <strong>Debug Console</strong>
+    <div>
+      <button onclick="toggleDebugConsole()" style="background: #666; color: white; border: none; padding: 4px 8px; cursor: pointer;">Hide</button>
+    </div>
+  </div>
+  <div id="debugContent" style="padding: 8px; white-space: pre-wrap; overflow-y: auto; height: calc(100% - 40px);"></div>
+</div>
+
+<script>
+let debugLogs = JSON.parse(localStorage.getItem('debugLogs') || '[]');
+let debugConsoleVisible = true;
+
+function logDebug(message, type) {
+  type = type || 'info';
+  const timestamp = new Date().toISOString();
+  const logEntry = '[' + timestamp + '] [' + type.toUpperCase() + '] ' + message;
+  debugLogs.push(logEntry);
+  
+  // Keep only last 1000 entries
+  if (debugLogs.length > 1000) {
+    debugLogs = debugLogs.slice(-1000);
+  }
+  
+  // Save to localStorage
+  localStorage.setItem('debugLogs', JSON.stringify(debugLogs));
+  
+  if (debugConsoleVisible) {
+    updateDebugDisplay();
+  }
+}
+
+function updateDebugDisplay() {
+  const content = document.getElementById('debugContent');
+  if (content) {
+    content.textContent = debugLogs.join('\n');
+    // Auto-scroll to bottom
+    content.scrollTop = content.scrollHeight;
+  }
+}
+
+function toggleDebugConsole() {
+  debugConsoleVisible = !debugConsoleVisible;
+  const console = document.getElementById('debugConsole');
+  if (console) {
+    console.style.display = debugConsoleVisible ? 'block' : 'none';
+  }
+}
+
+// Override fetch to log API calls
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+  logDebug('API Call: ' + args[0], 'api');
+  return originalFetch.apply(this, args)
+    .then(response => {
+      logDebug('API Response: ' + args[0] + ' - ' + response.status, 'api');
+      return response;
+    })
+    .catch(error => {
+      logDebug('API Error: ' + args[0] + ' - ' + error.message, 'error');
+      throw error;
+    });
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+  logDebug('Page loaded: ' + window.location.pathname, 'page');
+  updateDebugDisplay();
+});
+</script>
