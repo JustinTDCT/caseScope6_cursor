@@ -1,20 +1,114 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="grid">
-  <div class="tile">OpenSearch: <span id="os-status">Checking...</span></div>
-  <div class="tile">OS: <span id="os-version">Loading...</span></div>
-  <div class="tile">Sigma rules: <span id="sigma-count">0</span> | Updated: <span id="sigma-updated">N/A</span></div>
-  <div class="tile">Chainsaw rules: <span id="chainsaw-count">0</span> | Updated: <span id="chainsaw-updated">N/A</span></div>
-  <div class="tile">Cases: <span id="case-count">0</span></div>
-  <div class="tile">Files: <span id="file-count">0</span> | Size: <span id="file-size">0 B</span></div>
+  <div class="tile">
+    <h3>OpenSearch</h3>
+    <div id="os-status">Checking...</div>
+    <div id="os-version" class="muted"></div>
+  </div>
+  <div class="tile">
+    <h3>System</h3>
+    <div id="os-version-info">Loading...</div>
+    <div id="hostname" class="muted"></div>
+  </div>
+  <div class="tile">
+    <h3>Sigma Rules</h3>
+    <div id="sigma-count">0</div>
+    <div id="sigma-updated" class="muted">N/A</div>
+  </div>
+  <div class="tile">
+    <h3>Chainsaw Rules</h3>
+    <div id="chainsaw-count">0</div>
+    <div id="chainsaw-updated" class="muted">N/A</div>
+  </div>
+  <div class="tile">
+    <h3>Cases</h3>
+    <div id="case-count">0</div>
+  </div>
+  <div class="tile">
+    <h3>Files</h3>
+    <div id="file-count">0</div>
+    <div id="file-size" class="muted">0 B</div>
+  </div>
 </div>
-<div class="tile">
-  <h2>Recent cases</h2>
-  <ul id="recent-cases"></ul>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2>Recent Cases</h2>
+  </div>
+  <div class="panel-body">
+    <div id="recent-cases">Loading...</div>
+  </div>
 </div>
+
 <script>
-document.addEventListener("DOMContentLoaded", ()=> {
-  document.getElementById("os-status").innerText = "Pending setup";
+document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    const response = await fetch('/api/dashboard-data');
+    const data = await response.json();
+    
+    // Update OpenSearch status
+    document.getElementById('os-status').textContent = data.opensearch_status;
+    document.getElementById('os-version').textContent = `v${data.opensearch_version}`;
+    
+    // Update system info
+    document.getElementById('os-version-info').textContent = data.os_version;
+    document.getElementById('hostname').textContent = data.hostname;
+    
+    // Update rules
+    document.getElementById('sigma-count').textContent = data.sigma_count;
+    document.getElementById('sigma-updated').textContent = data.sigma_updated;
+    document.getElementById('chainsaw-count').textContent = data.chainsaw_count;
+    document.getElementById('chainsaw-updated').textContent = data.chainsaw_updated;
+    
+    // Update counts
+    document.getElementById('case-count').textContent = data.case_count;
+    document.getElementById('file-count').textContent = data.file_count;
+    document.getElementById('file-size').textContent = formatBytes(data.file_size_bytes);
+    
+    // Update recent cases
+    const casesDiv = document.getElementById('recent-cases');
+    if (data.recent_cases.length === 0) {
+      casesDiv.innerHTML = '<div class="muted">No cases yet</div>';
+    } else {
+      casesDiv.innerHTML = data.recent_cases.map(caseItem => 
+        `<div class="case-item" onclick="openCase(${caseItem.id})">
+          <strong>${caseItem.name}</strong>
+          <div class="muted">${caseItem.description || 'No description'}</div>
+          <div class="muted">Created: ${new Date(caseItem.created_at).toLocaleDateString()}</div>
+        </div>`
+      ).join('');
+    }
+  } catch (error) {
+    console.error('Failed to load dashboard data:', error);
+    document.getElementById('os-status').textContent = 'Error loading data';
+  }
 });
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function openCase(caseId) {
+  console.log('Opening case:', caseId);
+}
 </script>
+
+<style>
+.case-item {
+  padding: 12px;
+  border: 1px solid var(--tile-border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.case-item:hover {
+  background-color: var(--bg2);
+}
+</style>
 {% endblock %}

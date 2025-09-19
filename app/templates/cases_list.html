@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <h1>Case Management</h1>
+    <div class="row">
+      <a class="btn btn-primary" href="/cases/new">Create New Case</a>
+      <a class="btn btn-secondary" href="/cases">Refresh Cases</a>
+    </div>
+  </div>
+  <div class="panel-body">
+    {% if cases %}
+      <div class="cases-grid">
+        {% for case in cases %}
+        <div class="case-card" onclick="openCase({{ case.id }})">
+          <h3>{{ case.name }}</h3>
+          <p class="muted">{{ case.description or 'No description' }}</p>
+          <div class="case-meta">
+            <span class="muted">Created: {{ case.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="muted">No cases yet. <a href="/cases/new">Create your first case</a></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function openCase(caseId) {
+  window.location.href = `/cases/${caseId}`;
+}
+</script>
+
+<style>
+.cases-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.case-card {
+  background: var(--tile);
+  border: 1px solid var(--tile-border);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.case-card:hover {
+  background: var(--bg2);
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.case-card h3 {
+  margin: 0 0 8px 0;
+  color: var(--text);
+}
+
+.case-meta {
+  margin-top: 12px;
+  font-size: 0.9em;
+}
+</style>
+{% endblock %}

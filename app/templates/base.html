@@ -5,25 +5,46 @@
     <title>caseScope v{{ version }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="/static/css/theme.css" rel="stylesheet">
+    <script defer src="/static/js/app.js"></script>
   </head>
-  <body>
-    <header class="topbar">
-      <div class="brand"><span class="brand-case">case</span><span class="brand-scope">Scope</span></div>
-      <div class="version">v{{ version }}</div>
-      {% if username %}
-      <div class="userbar">
-        <span>{{ username }} ({{ role }})</span>
-        <form method="post" action="/logout"><button class="btn btn-secondary">Logout</button></form>
-      </div>
-      {% endif %}
-    </header>
-    <main class="container">
-      {% block content %}{% endblock %}
-    </main>
-    <footer class="footer">
-      <span>&copy; 2025 Justin Dube</span>
-      <a href="mailto:casescope@thedubes.net">casescope@thedubes.net</a>
-    </footer>
-    <script src="/static/js/app.js"></script>
+  <body class="bg">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brandrow">
+          <div class="brand"><span class="brand-case">case</span><span class="brand-scope">Scope</span></div>
+          <span class="version-badge">v{{ version }}</span>
+        </div>
+        <nav class="nav">
+          <a class="nav-item {% if request.url.path.startswith('/dashboard') %}active{% endif %}" href="/dashboard">System Dashboard</a>
+          <a class="nav-item {% if request.url.path.startswith('/cases') %}active{% endif %}" href="/cases">Cases</a>
+          <a class="nav-item {% if request.url.path.startswith('/upload') %}active{% endif %}" href="/upload">Upload EVTX</a>
+          <a class="nav-item {% if request.url.path.startswith('/search') %}active{% endif %}" href="/search">Search</a>
+          <a class="nav-item {% if request.url.path.startswith('/settings') %}active{% endif %}" href="/settings">Settings</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div class="case-selector">
+            <select id="currentCase" onchange="switchCase(this.value)">
+              <option value="">Select Case...</option>
+            </select>
+          </div>
+          <div class="userbar">
+            <button id="themeToggle" class="btn btn-ghost" title="Toggle theme">Theme</button>
+            {% if username %}
+            <span class="userinfo">{{ username }} ({{ role }})</span>
+            <form method="post" action="/logout"><button class="btn btn-secondary">Logout</button></form>
+            {% endif %}
+          </div>
+        </header>
+        <section class="content">
+          {% block content %}{% endblock %}
+        </section>
+        <footer class="footer">
+          <span>&copy; 2025 Justin Dube</span>
+          <a href="mailto:casescope@thedubes.net">casescope@thedubes.net</a>
+        </footer>
+      </main>
+    </div>
   </body>
 </html>

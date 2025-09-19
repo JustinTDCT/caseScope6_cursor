@@ -6,21 +6,26 @@ APP_DIR="/opt/casescope"
 PY_ENV="$APP_DIR/venv"
 OS_USER="casescope"
 SERVICE_NAME="casescope"
-exec 3>&1 1>>"${LOG_DIR}/install.log" 2>&1 || true
+
+# Ensure log dir/file exist before redirecting stdout/stderr
+sudo mkdir -p "$LOG_DIR"
+sudo touch "${LOG_DIR}/install.log"
+
+# Redirect logs after the file exists
+exec 3>&1
+exec 1>>"${LOG_DIR}/install.log"
+exec 2>&1
 
 msg(){ echo "$(date -u +"%F %T") | $*" >&3; echo "$(date -u +"%F %T") | $*"; }
 
 pre_checks(){
-  sudo mkdir -p "$LOG_DIR"
-  sudo touch "${LOG_DIR}/install.log"
   msg "Starting install..."
   if ! id -u "$OS_USER" >/dev/null 2>&1; then
     sudo useradd -r -s /usr/sbin/nologin -d "$APP_DIR" "$OS_USER" || true
   fi
   sudo mkdir -p "$APP_DIR"
-  sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR"
+  sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR" || true
 }
-
 install_prereqs(){
   msg "Installing prerequisites"
   sudo apt update -y
