@@ -24,12 +24,15 @@ pre_checks(){
     sudo useradd -r -s /usr/sbin/nologin -d "$APP_DIR" "$OS_USER" || true
   fi
   sudo mkdir -p "$APP_DIR"
+  sudo mkdir -p "$APP_DIR/uploads"
+  sudo mkdir -p "$APP_DIR/logs"
   sudo chown -R "$OS_USER:$OS_USER" "$APP_DIR" || true
 }
+
 install_prereqs(){
   msg "Installing prerequisites"
   sudo apt update -y
-  sudo apt install -y curl unzip python3-venv python3-pip openjdk-17-jre-headless
+  sudo apt install -y curl unzip python3-venv python3-pip openjdk-17-jre-headless jq git
 }
 
 install_opensearch(){
@@ -53,6 +56,9 @@ setup_python(){
   sudo -u "$OS_USER" python3 -m venv "$PY_ENV"
   sudo -u "$OS_USER" "$PY_ENV/bin/pip" install --upgrade pip
   sudo -u "$OS_USER" "$PY_ENV/bin/pip" install -r "$APP_DIR/requirements.txt"
+  
+  # Set database environment variable
+  echo "DATABASE_URL=sqlite:////opt/casescope/casescope.db" | sudo tee -a /etc/environment
 }
 
 install_chainsaw_sigma(){
@@ -90,6 +96,7 @@ User=${OS_USER}
 Group=${OS_USER}
 WorkingDirectory=${APP_DIR}
 Environment="PATH=${PY_ENV}/bin"
+Environment="DATABASE_URL=sqlite:////opt/casescope/casescope.db"
 ExecStart=${PY_ENV}/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
 Restart=on-failure
 
@@ -105,6 +112,7 @@ post_info(){
   msg "Service: systemctl status ${SERVICE_NAME}"
   msg "App:     http://SERVER_IP:8080"
   msg "Health:  curl -s http://127.0.0.1:8080/health"
+  msg "Default login: Admin / ChangeMe!"
 }
 
 pre_checks
