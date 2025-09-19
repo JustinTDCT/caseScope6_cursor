@@ -1,0 +1,14 @@
+# Bytecode
+__pycache__/
+*.pyc
+
+# Venv
+venv/
+
+# Local paths and artifacts
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db

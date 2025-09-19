@@ -1,20 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid">
-  <div class="tile">OpenSearch: <span id="os-status">Checking...</span></div>
-  <div class="tile">OS: <span id="os-version">Loading...</span></div>
-  <div class="tile">Sigma rules: <span id="sigma-count">0</span> | Updated: <span id="sigma-updated">N/A</span></div>
-  <div class="tile">Chainsaw rules: <span id="chainsaw-count">0</span> | Updated: <span id="chainsaw-updated">N/A</span></div>
-  <div class="tile">Cases: <span id="case-count">0</span></div>
-  <div class="tile">Files: <span id="file-count">0</span> | Size: <span id="file-size">0 B</span></div>
+<div class="panel">
+  <div class="panel-header">
+    <h1>Case Management</h1>
+    <div class="row">
+      <a class="btn btn-primary" href="/cases/new">Create New Case</a>
+      <a class="btn btn-secondary" href="/cases">Refresh Cases</a>
+    </div>
+  </div>
 </div>
-<div class="tile">
-  <h2>Recent cases</h2>
-  <ul id="recent-cases"></ul>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2>Available Cases</h2>
+  </div>
+  <div class="panel-body">
+    <div class="muted">Loading cases...</div>
+  </div>
 </div>
-<script>
-document.addEventListener("DOMContentLoaded", ()=> {
-  document.getElementById("os-status").innerText = "Pending setup";
-});
-</script>
 {% endblock %}

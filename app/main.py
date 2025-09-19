@@ -10,6 +10,9 @@ VERSION = (open(os.path.join(os.path.dirname(__file__), "..", "VERSION")).read()
            if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "VERSION")) else "6.0.0")
 
 app = FastAPI(title=APP_NAME, version=VERSION)
+from app.auth.routes import router as auth_router
+from app.auth.routes import current_session as get_session_ctx, role_guard
+app.include_router(auth_router)
 
 from app.auth.routes import router as auth_router
 app.include_router(auth_router)
@@ -41,3 +44,23 @@ def dashboard(request: Request, role: str = Depends(get_user_role)):
         "username": request.cookies.get("username", "Admin"),
         "role": role
     })
+
+from fastapi import Form
+
+@app.get("/upload", response_class=HTMLResponse)
+def upload_page(request: Request, role: str = Depends(get_user_role)):
+    if role == "Anonymous":
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse("upload.html", {"request": request, "version": VERSION, "username": request.cookies.get("username"), "role": role})
+
+@app.get("/search", response_class=HTMLResponse)
+def search_page(request: Request, role: str = Depends(get_user_role)):
+    if role == "Anonymous":
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse("search.html", {"request": request, "version": VERSION, "username": request.cookies.get("username"), "role": role})
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, role: str = Depends(get_user_role)):
+    if role == "Anonymous":
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse("settings.html", {"request": request, "version": VERSION, "username": request.cookies.get("username"), "role": role})
